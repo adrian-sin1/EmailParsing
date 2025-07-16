@@ -4,11 +4,12 @@ import re
 
 def extract_replies_with_senders(body, csv_email):
     pattern = re.compile(
-        r'(?=^From:|^On .+? wrote:|^-----Original Message-----)', 
+        r'(?=^From:|^On .+? wrote:|^-----Original Message-----)',
         re.IGNORECASE | re.MULTILINE
     )
     chunks = pattern.split(body.strip())
     results = []
+
     last_sender = csv_email
 
     for i, chunk in enumerate(chunks):
@@ -18,7 +19,6 @@ def extract_replies_with_senders(body, csv_email):
 
         sender = None
 
-        # First chunk is from CSV sender
         if i == 0:
             sender = csv_email
         else:
@@ -42,36 +42,36 @@ def extract_replies_with_senders(body, csv_email):
     return results
 
 
+# Read and process the exported CSV
+input_file = "Export_for_Logs.csv"
+output_file = "output.csv"
 rows = []
 
-# 🔽 NEW: Input file name
-input_file = 'Export_for_Logs.CSV'
-
-# 🔽 NEW: Output file name
-output_file = 'output.csv'
-
 with open(input_file, 'r', encoding='ISO-8859-1') as infile:
-    reader = csv.reader(infile)
-    # next(reader)  # Uncomment if your CSV has a header
+    reader = csv.DictReader(infile)
 
     for row in reader:
-        if len(row) >= 5:
-            raw_names = row[0].strip(" '\"")
-            email = row[1].strip(" '\"")
-            body = row[4]
+        name = row.get("To: (Name)", "").strip(" '\"")
+        email = row.get("To: (Address)", "").strip(" '\"")
+        subject = row.get("Subject", "").strip(" '\"")
+        body = row.get("Body", "")
 
-            names = [n.strip() for n in raw_names.split(';')]
-            replies = extract_replies_with_senders(body, email)
+        replies = extract_replies_with_senders(body, email)
 
-            for name in names:
-                for sender, reply_text in replies:
-                    rows.append([name, email, sender, reply_text])
+        for sender, reply_text in replies:
+            rows.append({
+                "Name": name,
+                "Email": email,
+                "Subject": subject,
+                "Sender": sender,
+                "Reply": reply_text
+            })
 
-# ✅ Write clean output with no separators
+# Write to output.csv
 with open(output_file, 'w', newline='', encoding='utf-8') as out:
-    writer = csv.writer(out, quoting=csv.QUOTE_ALL, doublequote=True, lineterminator=os.linesep)
-    writer.writerow(['Name', 'Email', 'Sender', 'Reply'])
-
+    fieldnames = ["Name", "Email", "Subject", "Sender", "Reply"]
+    writer = csv.DictWriter(out, fieldnames=fieldnames, quoting=csv.QUOTE_ALL)
+    writer.writeheader()
     for row in rows:
         writer.writerow(row)
 

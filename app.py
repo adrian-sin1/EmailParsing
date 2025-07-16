@@ -3,56 +3,69 @@ import pandas as pd
 import csv
 import os
 
-st.set_page_config(page_title="Email Reply Review", layout="wide")
-st.title("📧 Email Reply Review & Export")
+# Page setup
+st.set_page_config(page_title="📬 Email Parser Viewer", layout="wide")
+st.title("📬 Parsed Email Viewer")
+st.markdown("Upload and explore parsed emails, grouped by thread (subject). Select threads to export them as CSV.")
 
-st.markdown("""
-This app loads `output1.csv`, shows parsed replies from your exported emails,
-and lets you select which ones to keep and export for use elsewhere.
-""")
-
-# Step 1: Load file
-uploaded_file = st.file_uploader("📥 Upload output1.csv (optional)", type="csv")
+# Load CSV
+uploaded_file = st.file_uploader("📥 Upload a parsed CSV file", type="csv")
 
 if uploaded_file:
     df = pd.read_csv(uploaded_file)
-elif os.path.exists("output1.csv"):
-    df = pd.read_csv("output1.csv")
-    st.info("Auto-loaded local file: `output1.csv`")
+    st.success("Uploaded file loaded successfully.")
+elif os.path.exists("output.csv"):
+    df = pd.read_csv("output.csv")
+    st.info("Loaded `output.csv` from local folder.")
 else:
-    st.warning("No file uploaded and `output1.csv` not found in this folder.")
+    st.warning("No file uploaded and `output.csv` not found.")
     st.stop()
 
-# Step 2: Filter out bad rows (like separator lines)
-df = df.dropna(subset=['Name', 'Email', 'Reply']).copy()
-df = df[~df['Name'].str.contains(r'^[-=]{3,}$', na=False)]
+# Preprocess
+df["__order"] = range(len(df))  # Preserve original order
+df["Subject"] = df.get("Subject", "No Subject").fillna("No Subject")
 
-# Step 3: Display with checkboxes
-st.subheader("✅ Select replies to export")
+# Group by thread
+grouped = df.groupby("Subject", sort=False)
+selected_groups = []
 
-selected_rows = []
-for i, row in df.iterrows():
-    with st.expander(f"{i+1}. {row['Name']} | {row['Email']}", expanded=False):
-        st.markdown(f"**🧑 Name:** {row['Name']}")
-        st.markdown(f"**📨 Email:** {row['Email']}")
-        st.markdown(f"**✉️ Sender:** {row['Sender']}")
-        st.markdown("**📝 Reply:**")
-        st.code(row['Reply'], language='text')
-        if st.checkbox("Include this reply", key=f"row_{i}"):
-            selected_rows.append(row)
+st.subheader("📑 Email Threads")
 
-# Step 4: Export button
-if st.button("📤 Export Selected Replies"):
-    if not selected_rows:
-        st.error("⚠️ You didn't select any replies.")
+for i, (subject, group) in enumerate(grouped, start=1):
+    group = group.sort_values("__order")
+    first_name = group.iloc[0].get("Name", "Unknown")
+    expander_title = f"{i}. {first_name} | {subject}"
+
+    col1, col2 = st.columns([0.05, 0.95])
+    with col1:
+        checked = st.checkbox("✔", key=f"select_{i}_{subject}", label_visibility="collapsed")
+    with col2:
+        with st.expander(expander_title):
+            for j, (_, row) in enumerate(group.iterrows()):
+                st.markdown(f"""
+                **Name**: {row.get("Name", "")}  
+                **Email**: {row.get("Email", "")}  
+                **Sender**: {row.get("Sender", "")}  
+                **Phone**: {row.get("Phone", "")}  
+                **Reply:**  
+                ```text
+{row.get("Reply", "").strip()}
+                ```
+                """, unsafe_allow_html=True)
+    
+    if checked:
+        selected_groups.append(group)
+
+# Export
+st.divider()
+st.subheader("📤 Export")
+
+if st.button("Export Selected Threads"):
+    if not selected_groups:
+        st.error("Please select at least one thread to export.")
     else:
-        result_df = pd.DataFrame(selected_rows)
-        result_df.to_csv("filtered_output1.csv", index=False, quoting=csv.QUOTE_ALL)
-        st.success(f"✅ Exported {len(result_df)} rows to `filtered_output1.csv`.")
-
-        st.download_button(
-            label="⬇️ Download Filtered File",
-            data=result_df.to_csv(index=False),
-            file_name="filtered_output1.csv",
-            mime="text/csv"
-        )
+        result_df = pd.concat(selected_groups)
+        result_df = result_df.drop(columns=["__order"], errors="ignore")
+        csv_data = result_df.to_csv(index=False, quoting=csv.QUOTE_ALL)
+        st.download_button("⬇️ Download Exported CSV", data=csv_data, file_name="filtered_output.csv", mime="text/csv")
+        st.success(f"Exported {len(result_df)} replies from {len(selected_groups)} threads.")
