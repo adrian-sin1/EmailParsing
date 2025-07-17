@@ -66,14 +66,14 @@ with open('record127.csv', 'r', encoding='ISO-8859-1') as infile:
 
             for name in names:
                 for sender, reply_text in replies:
-                    rows.append([name, email, sender, reply_text])
+                    rows.append([name, email, reply_text])
                 rows.append(["======================================="])  # Row separator
 
 
 # Write results
 with open('output1.csv', 'w', newline='', encoding='utf-8') as out:
     writer = csv.writer(out, quoting=csv.QUOTE_ALL, doublequote=True, lineterminator=os.linesep)
-    writer.writerow(['Name', 'Email', 'Sender', 'Reply'])
+    writer.writerow(['Name', 'Email', 'Reply'])
 
     for row in rows:
         writer.writerow(row)
