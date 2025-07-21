@@ -2,81 +2,124 @@ import time
 import pandas as pd
 from selenium import webdriver
 from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.edge.service import Service
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
-# ==== CONFIGURATION ====
-CSV_FILE = "filtered_output.csv"  # make sure this is in the same folder as the script
+# === CONFIGURATION ===
+CSV_FILE = "filtered_output.csv"
+LOGIN_URL = "https://councilconnect.council.nyc.gov/login"
 FORM_URL = "https://councilconnect.council.nyc.gov/casework/create"
+USERNAME = "ASin@council.nyc.gov"
+PASSWORD = "wfZZSbwGM6beoo3"
+DRIVER_PATH = r"C:\Users\ASin\Documents\edgedriver_win64\msedgedriver.exe"
 
-BROWSER = "edge"
-DRIVER_PATH = r"C:\Users\ASin\Documents\msedgedriver.exe"  # ← UPDATE THIS!
-
-# Map your CSV columns to form input fields (adjust IDs or names after inspecting the form)
-FIELD_MAP = {
-    "Name": "constituent_name",          # Update this to the actual ID or name in the form
-    "Email": "constituent_email",        # Update accordingly
-    "Sender": "constituent_phone",       # Optional: change or add more
-    # Add more fields here if needed
+# === FIELD MAPS ===
+FIELD_MAP_STEP_1 = {
+    "Name": "newConstituent.name"
+}
+FIELD_MAP_STEP_2 = {
+    "Subject": "topic-select",
+    "Body": "details"
 }
 
-def fill_form(driver, data):
-    """Fills out the form with data from one CSV row."""
-    for csv_col, field_id_or_name in FIELD_MAP.items():
-        val = data.get(csv_col, "")
-        if not val or pd.isna(val):
+def login(driver, wait):
+    driver.get(LOGIN_URL)
+    wait.until(EC.presence_of_element_located((By.ID, "username"))).send_keys(USERNAME)
+    driver.find_element(By.ID, "password").send_keys(PASSWORD)
+    driver.find_element(By.CSS_SELECTOR, 'button[type="submit"]').click()
+    wait.until(EC.url_changes(LOGIN_URL))
+    print("✅ Logged in")
+
+def handle_disclaimer(driver, wait):
+    try:
+        accept_btn = wait.until(EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'Accept')]")))
+        accept_btn.click()
+        print("✅ Dismissed disclaimer popup")
+    except:
+        print("ℹ️ No disclaimer popup found")
+
+def click_create_new_constituent(driver, wait):
+    try:
+        wait.until(EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'Create New Constituent')]"))).click()
+        print("✅ Clicked 'Create New Constituent'")
+    except Exception as e:
+        print(f"❌ Failed to click 'Create New Constituent': {e}")
+        return False
+
+    time.sleep(2)
+    try:
+        wait.until(EC.visibility_of_element_located((By.ID, "newConstituent.name")))
+        print("✅ Form appeared")
+        return True
+    except Exception as e:
+        print(f"❌ Form did not appear after clicking: {e}")
+        driver.save_screenshot("form_not_appeared.png")
+        return False
+
+def fill_form(driver, row, field_map):
+    for col, field_id in field_map.items():
+        value = row.get(col, "")
+        if pd.isna(value) or not value:
             continue
-
         try:
-            # Try ID first
-            input_field = driver.find_element(By.ID, field_id_or_name)
-        except:
-            try:
-                # Try name as fallback
-                input_field = driver.find_element(By.NAME, field_id_or_name)
-            except:
-                print(f"⚠️ Could not find field: {field_id_or_name}")
-                continue
+            field = WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.ID, field_id)))
+            field.clear()
+            time.sleep(0.5)
+            field.send_keys(str(value))
+            print(f"✅ Filled '{col}'")
+            if field_id == "topic-select":
+                time.sleep(1)
+                field.send_keys(Keys.DOWN)
+                field.send_keys(Keys.RETURN)
+                print("➡️ Selected autocomplete topic")
+        except Exception as e:
+            print(f"⚠️ Could not fill '{field_id}': {e}")
 
-        input_field.clear()
-        input_field.send_keys(val)
+def click_next_step(driver, wait):
+    try:
+        next_btn = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, 'button.css-pejez8')))
+        next_btn.click()
+        print("➡️ Clicked 'Next Step'")
+    except Exception as e:
+        print(f"⚠️ Failed to click 'Next Step': {e}")
 
 def main():
     df = pd.read_csv(CSV_FILE)
+    service = Service(DRIVER_PATH)
+    driver = webdriver.Edge(service=service)
+    wait = WebDriverWait(driver, 30)
 
-    # Launch correct browser driver
-    if BROWSER == "chrome":
-        driver = webdriver.Chrome(executable_path=DRIVER_PATH)
-    elif BROWSER == "firefox":
-        driver = webdriver.Firefox(executable_path=DRIVER_PATH)
-    elif BROWSER == "edge":
-        driver = webdriver.Edge(executable_path=DRIVER_PATH)
-    else:
-        raise ValueError("Unsupported browser")
+    try:
+        login(driver, wait)
+        handle_disclaimer(driver, wait)
 
-    wait = WebDriverWait(driver, 10)
+        for i, row in df.iterrows():
+            print(f"\n🚀 Submitting entry {i + 1}/{len(df)}")
+            driver.get(FORM_URL)
+            wait.until(EC.presence_of_element_located((By.TAG_NAME, "form")))
 
-    for idx, row in df.iterrows():
-        print(f"🚀 Submitting row {idx + 1}...")
+            if not click_create_new_constituent(driver, wait):
+                print("⏭ Skipping entry: form not opened.")
+                continue
 
-        driver.get(FORM_URL)
-        wait.until(EC.presence_of_element_located((By.TAG_NAME, "form")))
+            fill_form(driver, row, FIELD_MAP_STEP_1)
+            click_next_step(driver, wait)
 
-        # Fill form with row data
-        fill_form(driver, row)
+            # STEP 2 - Casework Details
+            wait.until(EC.visibility_of_element_located((By.ID, "details")))
+            fill_form(driver, row, FIELD_MAP_STEP_2)
+            driver.save_screenshot(f"entry_{i+1}_step2_filled.png")
+            print("✅ Step 2 filled")
 
-        # Click submit (adjust button selector if needed)
-        try:
-            submit_btn = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "button[type='submit']")))
-            submit_btn.click()
-            print(f"✅ Submitted row {idx + 1}")
-        except Exception as e:
-            print(f"❌ Failed to submit row {idx + 1}: {e}")
+            time.sleep(2)  # Pause between entries
 
-        time.sleep(3)  # Wait for confirmation / avoid rate limits
+        print("\n✅ All entries processed.")
 
-    driver.quit()
-    print("✅ All done! Browser closed.")
+    finally:
+        print("🛑 Leaving browser open for inspection.")
+        input() 
 
 if __name__ == "__main__":
     main()

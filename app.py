@@ -40,17 +40,74 @@ export_format = st.radio(
 )
 
 export_now = st.button("📤 Export Selected Threads")
-
-# Placeholder for download button
 download_placeholder = st.empty()
 
-# Collect selected groups whether or not export is pressed
+# --- 🔍 Search Section ---
+st.subheader("🔍 Search Threads")
+search_query = st.text_input("Search by subject or name:", "").strip().lower()
+
+# --- 🔘 Select All Checkbox ---
+
+total_groups = len(grouped)
+
+# Initialize individual checkbox states if missing
+for i in range(1, total_groups + 1):
+    key = f"select_{i}"
+    if key not in st.session_state:
+        st.session_state[key] = False
+
+# Select All checkbox
+select_all_state = st.checkbox("🔘 Select All Threads", key="select_all_toggle")
+
+# Track previous state to detect changes
+if "prev_select_all" not in st.session_state:
+    st.session_state.prev_select_all = False
+
+# Update all checkboxes only if Select All changed this run
+if select_all_state != st.session_state.prev_select_all:
+    for i in range(1, total_groups + 1):
+        st.session_state[f"select_{i}"] = select_all_state
+    st.session_state.prev_select_all = select_all_state
+
+# --- 📑 Email Threads Section ---
+st.subheader("📑 Email Threads")
+
 selected_groups = []
+matches_found = False
+
 for i, (subject, group) in enumerate(grouped, start=1):
-    if st.session_state.get(f"select_{i}", False):
+    group = group.sort_values("__order")
+    first_name = group.iloc[0].get("Name", "Unknown")
+
+    searchable_text = f"{first_name} {subject}".lower()
+    if search_query and search_query not in searchable_text:
+        continue
+
+    matches_found = True
+    expander_title = f"{i}. {first_name} | {subject} ({len(group)} replies)"
+
+    col1, col2 = st.columns([0.05, 0.95])
+    with col1:
+        selected = st.checkbox("✔", key=f"select_{i}", label_visibility="collapsed")
+    with col2:
+        with st.expander(expander_title, expanded=False):
+            for _, row in group.iterrows():
+                st.markdown(f"""
+**Name**: {row.get("Name", "")}  
+**Email**: {row.get("Email", "")}  
+**Sender**: {row.get("Sender", "")}  
+**Reply:**  
+```text
+{row.get("Reply", "").strip()}
+```""", unsafe_allow_html=True)
+
+    if selected:
         selected_groups.append(group)
 
-# Prepare result_df only if exporting
+if not matches_found:
+    st.info("No threads matched your search.")
+
+# --- 📤 Exporting Logic ---
 result_df = None
 if export_now:
     if not selected_groups:
@@ -88,35 +145,3 @@ if result_df is not None:
                                              file_name="filtered_output.txt", mime="text/plain")
 else:
     download_placeholder.empty()
-
-# --- 🔍 Search Section ---
-st.subheader("🔍 Search Threads")
-search_query = st.text_input("Search by subject or name:", "").strip().lower()
-
-# --- 📑 Email Threads Section ---
-st.subheader("📑 Email Threads")
-for i, (subject, group) in enumerate(grouped, start=1):
-    group = group.sort_values("__order")
-    first_name = group.iloc[0].get("Name", "Unknown")
-    
-    # Filter based on search query
-    searchable_text = f"{first_name} {subject}".lower()
-    if search_query and search_query not in searchable_text:
-        continue
-
-    expander_title = f"{i}. {first_name} | {subject} ({len(group)} replies)"
-
-    col1, col2 = st.columns([0.05, 0.95])
-    with col1:
-        st.checkbox("✔", key=f"select_{i}", label_visibility="collapsed")
-    with col2:
-        with st.expander(expander_title, expanded=False):
-            for _, row in group.iterrows():
-                st.markdown(f"""
-**Name**: {row.get("Name", "")}  
-**Email**: {row.get("Email", "")}  
-**Sender**: {row.get("Sender", "")}  
-**Reply:**  
-```text
-{row.get("Reply", "").strip()}
-```""", unsafe_allow_html=True)
