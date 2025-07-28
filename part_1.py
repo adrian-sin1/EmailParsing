@@ -1,5 +1,4 @@
 import csv
-import os
 import re
 
 def extract_replies_with_senders(body, csv_email):
@@ -42,37 +41,48 @@ def extract_replies_with_senders(body, csv_email):
     return results
 
 
-# Read and process the exported CSV
-input_file = "Export_for_Logs-New.csv"
-output_file = "output.csv"
-rows = []
+def main():
+    input_file = "Export_for_Logs-New.csv"
+    output_file = "output.csv"
+    rows = []
 
-with open(input_file, 'r', encoding='ISO-8859-1') as infile:
-    reader = csv.DictReader(infile)
+    with open(input_file, 'r', encoding='ISO-8859-1') as infile:
+        reader = csv.DictReader(infile)
 
-    for row in reader:
-        name = row.get("To: (Name)", "").strip(" '\"")
-        email = row.get("To: (Address)", "").strip(" '\"")
-        subject = row.get("Subject", "").strip(" '\"")
-        body = row.get("Body", "")
+        for row in reader:
+            name = row.get("To: (Name)", "").strip(" '\"")
+            email = row.get("To: (Address)", "").strip(" '\"")
+            subject = row.get("Subject", "").strip(" '\"")
+            body = row.get("Body", "")
 
-        replies = extract_replies_with_senders(body, email)
+            # Handle Exchange internal address — look for any external email in the body
+            if email.lower().startswith("/o=nycc/ou=exchange"):
+                match_emails = re.findall(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b', body)
+                if match_emails:
+                    email = match_emails[0]
+                else:
+                    email = "/o=NYCC/ou=Exchange Administrative"
 
-        for sender, reply_text in replies:
-            rows.append({
-                "Name": name,
-                "Email": email,
-                "Subject": subject,
-                "Sender": sender,
-                "Reply": reply_text
-            })
+            replies = extract_replies_with_senders(body, email)
 
-# Write to output.csv
-with open(output_file, 'w', newline='', encoding='utf-8') as out:
-    fieldnames = ["Name", "Email", "Subject", "Sender", "Reply"]
-    writer = csv.DictWriter(out, fieldnames=fieldnames, quoting=csv.QUOTE_ALL)
-    writer.writeheader()
-    for row in rows:
-        writer.writerow(row)
+            for sender, reply_text in replies:
+                rows.append({
+                    "Name": name,
+                    "Email": email,
+                    "Subject": subject,
+                    "Sender": sender,
+                    "Reply": reply_text
+                })
 
-print(f"✅ Done! Created {len(rows)} rows in {output_file}")
+    with open(output_file, 'w', newline='', encoding='utf-8') as out:
+        fieldnames = ["Name", "Email", "Subject", "Sender", "Reply"]
+        writer = csv.DictWriter(out, fieldnames=fieldnames, quoting=csv.QUOTE_ALL)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow(row)
+
+    print(f"✅ Done! Created {len(rows)} rows in {output_file}")
+
+
+if __name__ == "__main__":
+    main()

@@ -1,124 +1,173 @@
-import time
 import pandas as pd
+import tkinter as tk
+from tkinter import filedialog
 from selenium import webdriver
-from selenium.webdriver.common.by import By
-from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.edge.service import Service
+from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from fuzzywuzzy import process
+import time
 
-# === CONFIG keys, adjust as needed ===
-CSV_FILE = "filtered_output.csv"
+from automation import (
+    login, handle_disclaimer, click_create_new_constituent,
+    fill_form, click_next_step, fill_details,
+    select_intake_method, click_create_casework, click_create_casework_from_home,
+    click_home_button
+)
+
+
+def get_user_inputs():
+    user_data = {}
+
+    def submit():
+        user_data["username"] = username_var.get()
+        user_data["password"] = password_var.get()
+        user_data["auto_click"] = auto_click_var.get()
+        root.destroy()
+
+    root = tk.Tk()
+    root.title("Casework Automation Setup")
+    root.geometry("400x220")
+    root.attributes('-topmost', True)
+
+    tk.Label(root, text="Username:").pack(pady=(10, 0))
+    username_var = tk.StringVar()
+    tk.Entry(root, textvariable=username_var, width=40).pack()
+
+    tk.Label(root, text="Password:").pack(pady=(10, 0))
+    password_var = tk.StringVar()
+    tk.Entry(root, textvariable=password_var, show='*', width=40).pack()
+
+    auto_click_var = tk.BooleanVar()
+    tk.Checkbutton(root, text="Automatically click 'Create Casework'", variable=auto_click_var).pack(pady=10)
+
+    tk.Button(root, text="Start", command=submit, width=15).pack(pady=10)
+
+    root.mainloop()
+    return user_data
+
+
+# === GUI Prompt for Login and Options ===
+user_inputs = get_user_inputs()
+USERNAME = user_inputs["username"]
+PASSWORD = user_inputs["password"]
+auto_click_create = user_inputs["auto_click"]
+print(f"✅ Auto click create casework is set to: {auto_click_create}")
+
+
+# === File picker ===
+def get_csv_file():
+    root = tk.Tk()
+    root.withdraw()
+    root.attributes('-topmost', True)
+    print("Opening file picker dialog...")
+    file_path = filedialog.askopenfilename(
+        title="Select CSV File",
+        filetypes=[("CSV Files", "*.csv"), ("All Files", "*.*")]
+    )
+    root.destroy()
+    print(f"File selected: {file_path}")
+    return file_path
+
+def wait_for_home_screen(driver, wait, timeout=120):
+    print("⏮ Waiting for return to Home screen...")
+    try:
+        WebDriverWait(driver, timeout).until(
+            EC.presence_of_element_located((By.XPATH, "//h2[contains(text(),'Create Casework')]"))
+        )
+        print("✅ Detected 'Create Casework' on home screen.")
+        return True
+    except Exception as e:
+        print("❌ Timed out waiting for Home screen.")
+        return False
+    
+# === Config ===
+DRIVER_PATH = r"C:\Users\ASin\Documents\edgedriver_win64\msedgedriver.exe"
 LOGIN_URL = "https://councilconnect.council.nyc.gov/login"
 FORM_URL = "https://councilconnect.council.nyc.gov/casework/create"
-USERNAME = "ASin@council.nyc.gov"
-PASSWORD = "wfZZSbwGM6beoo3"
-DRIVER_PATH = r"C:\Users\ASin\Documents\edgedriver_win64\msedgedriver.exe"
 
-# Map step 1 fields
-FIELD_STEP_1 = {
+FIELD_MAP_STEP_1 = {
     "Name": "newConstituent.name",
     "Email": "newConstituent.contact_info.0.contact_data"
 }
 
-def login(driver, wait):
-    driver.get(LOGIN_URL)
-    wait.until(EC.presence_of_element_located((By.ID, "username"))).send_keys(USERNAME)
-    driver.find_element(By.ID, "password").send_keys(PASSWORD)
-    driver.find_element(By.CSS_SELECTOR, 'button[type="submit"]').click()
-    time.sleep(30)
-    wait.until(EC.url_changes(LOGIN_URL))
-    print("✅ Logged in")
-
-def start_new_case(driver, wait):
-    wait.until(EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'Create New Constituent')]"))).click()
-    time.sleep(2)
-    wait.until(EC.visibility_of_element_located((By.ID, "newConstituent.name")))
-    print("✅ New Constituent form open")
-
-def fill_step1(driver, wait, row):
-    for col, field_id in FIELD_STEP_1.items():
-        val = row.get(col, "")
-        if pd.isna(val) or not val:
-            continue
-        fld = wait.until(EC.element_to_be_clickable((By.ID, field_id)))
-        fld.clear()
-        fld.send_keys(str(val))
-    print("✅ Step 1 filled")
-
-def get_valid_topics(driver, wait):
-    # click dropdown to populate choices
-    topic_btn = wait.until(EC.element_to_be_clickable((By.ID, "topic-select")))
-    topic_btn.click()
-    time.sleep(1)
-    lis = wait.until(EC.presence_of_all_elements_located((By.CSS_SELECTOR, "ul[role='listbox'] li")))
-    topics = [li.text.strip() for li in lis if li.text.strip()]
-    # close dropdown
-    topic_btn.send_keys(Keys.ESCAPE)
-    print(f"🔍 Scraped {len(topics)} topics")
-    return topics
-
-def map_subject(subject, topics):
-    if not subject or not isinstance(subject, str):
-        return ""
-    match, score = process.extractOne(subject, topics)
-    print(f"🔍 '{subject}' → '{match}' (score={score})")
-    return match if score >= 65 else ""
-
-def fill_case_details(driver, wait, subject, body, valid_topics):
-    mapped = map_subject(subject, valid_topics)
-    if not mapped:
-        print(f"⚠️ No close topic for '{subject}'")
-        return False
-
-    # open dropdown
-    btn = wait.until(EC.element_to_be_clickable((By.ID, "topic-select")))
-    btn.click()
-    time.sleep(0.5)
-    opt = wait.until(EC.element_to_be_clickable((By.XPATH, f"//li[normalize-space()='{mapped}']")))
-    opt.click()
-    print(f"✅ Chose topic: {mapped}")
-
-    # fill body
-    desc = wait.until(EC.presence_of_element_located((By.ID, "details")))
-    desc.clear()
-    desc.send_keys(body)
-    print("✅ Body filled")
-    return True
-
+# === Main Function ===
 def main():
+    CSV_FILE = get_csv_file()
+    if not CSV_FILE:
+        print("❌ No file selected. Exiting.")
+        return
+
     df = pd.read_csv(CSV_FILE)
     service = Service(DRIVER_PATH)
     driver = webdriver.Edge(service=service)
-    wait = WebDriverWait(driver, 20)
+    wait = WebDriverWait(driver, 30)
 
     try:
-        login(driver, wait)
+        login(driver, wait, LOGIN_URL, USERNAME, PASSWORD)
+        handle_disclaimer(driver, wait)
 
-        for idx, row in df.iterrows():
-            print(f"\n🚀 Processing entry {idx+1}/{len(df)}")
+        for i, row in df.iterrows():
+            print(f"\n🚀 Submitting entry {i + 1}/{len(df)}")
             driver.get(FORM_URL)
-            wait.until(EC.presence_of_element_located((By.TAG_NAME, "form")))
+            wait.until(lambda d: d.find_element(By.TAG_NAME, "form"))
 
-            start_new_case(driver, wait)
-            fill_step1(driver, wait, row)
-            wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, 'button.css-pejez8'))).click()
-            print("➡️ Moved to Case Details")
+            if not click_create_new_constituent(driver, wait):
+                print("⏭ Skipping entry: form not opened.")
+                continue
 
-            time.sleep(2)
-            valid_topics = get_valid_topics(driver, wait)
-            success = fill_case_details(driver, wait, row.get("Subject", ""), row.get("Body", ""), valid_topics)
+            fill_form(driver, row, FIELD_MAP_STEP_1)
+            click_next_step(driver, wait)
 
-            if not success:
-                print("❗ Skipping this entry due to mapping failure")
+            wait.until(lambda d: d.find_element(By.ID, "details"))
+            if not fill_details(driver, wait, row.get("Reply", "")):
+                print("⚠️ Skipped due to error filling details.")
+                continue
 
-            time.sleep(1)
+            click_next_step(driver, wait)
+            select_intake_method(driver, wait, "Emailed")
+            click_next_step(driver, wait)
+            click_next_step(driver, wait)
 
-        print("\n✅ Done!")
+            if auto_click_create:
+                click_create_casework(driver, wait)
 
+                if click_home_button(driver, wait):
+                    if wait_for_home_screen(driver, wait):
+                        time.sleep(1)
+                        click_create_casework_from_home(driver, wait)
+                    else:
+                        print("❌ Home page not detected after clicking Home button.")
+                else:
+                    print("❌ Failed to click Home button after creating casework.")
+            else:
+                print("🛑 Please click 'Create Casework' manually in the browser...")
+                try:
+                    WebDriverWait(driver, 60).until_not(
+                        EC.presence_of_element_located((By.XPATH, "//button[contains(text(), 'Create Casework')]"))
+                    )
+                    print("✅ Detected that 'Create Casework' was clicked.")
+                except:
+                    print("⚠️ Timeout waiting for manual click.")
+
+                # New: Click the Home button just like auto mode
+                if click_home_button(driver, wait):
+                    if wait_for_home_screen(driver, wait):
+                        time.sleep(0.5)
+                        print("🔁 Returning to Create Casework form for next entry...")
+                        click_create_casework_from_home(driver, wait)
+                    else:
+                        print("❌ Home page not detected after clicking Home button.")
+                else:
+                    print("❌ Failed to click Home button after manual create.")
+
+            print("✅ Entry processed\n")
+
+        print("\n✅ All entries processed.")
     finally:
-        input("🛑 Completed—all browser windows remain open for review.")
+        print("🛑 Browser left open for inspection.")
+        input("Press Enter to exit and close browser...")
+        driver.quit()
 
 if __name__ == "__main__":
     main()
