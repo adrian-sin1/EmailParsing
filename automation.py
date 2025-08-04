@@ -175,18 +175,24 @@ def click_create_casework_from_home(driver, wait):
     
 def click_home_button(driver, wait):
     try:
-        # Use a more precise XPath for the Home button/icon
-        short_wait = WebDriverWait(driver, 5)
-        home_button = short_wait.until(EC.element_to_be_clickable((By.XPATH, "//a[@aria-label='Home']")))
+        print("⏮ Trying to click Home button...")
 
-        # Click via JS to avoid Selenium click delays
+        # Use a slightly longer explicit wait
+        short_wait = WebDriverWait(driver, 15)
+        home_button = short_wait.until(
+            EC.element_to_be_clickable((By.XPATH, "//a[@aria-label='Home']"))
+        )
+
+        # Click via JavaScript
         driver.execute_script("arguments[0].click();", home_button)
         print("✅ Clicked Home button")
 
-        # Wait for a known element on the Home page (adjust XPath as needed)
+        # Wait for a known element on the Home page
         wait.until(EC.presence_of_element_located((By.XPATH, "//h2[contains(text(),'Create Casework')]")))
         print("✅ Home page loaded")
         return True
+
     except Exception as e:
-        print(f"❌ Could not click Home button: {e}")
+        print("❌ Could not click Home button:")
+        print(f"   → {type(e).__name__}: {e}")
         return False

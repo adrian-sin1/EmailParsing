@@ -6,7 +6,14 @@ from selenium.webdriver.edge.service import Service
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import NoSuchElementException
 import time
+from datetime import datetime
+import os
+import sys
+
+
+
 
 from automation import (
     login, handle_disclaimer, click_create_new_constituent,
@@ -15,7 +22,7 @@ from automation import (
     click_home_button
 )
 
-
+# === GUI Prompt for Login and Options ===
 def get_user_inputs():
     user_data = {}
 
@@ -30,7 +37,7 @@ def get_user_inputs():
     root.geometry("400x220")
     root.attributes('-topmost', True)
 
-    tk.Label(root, text="Username:").pack(pady=(10, 0))
+    tk.Label(root, text="Council ID:").pack(pady=(10, 0))
     username_var = tk.StringVar()
     tk.Entry(root, textvariable=username_var, width=40).pack()
 
@@ -39,7 +46,7 @@ def get_user_inputs():
     tk.Entry(root, textvariable=password_var, show='*', width=40).pack()
 
     auto_click_var = tk.BooleanVar()
-    tk.Checkbutton(root, text="Automatically click 'Create Casework'", variable=auto_click_var).pack(pady=10)
+    tk.Checkbutton(root, text="Automatically click 'Save'", variable=auto_click_var).pack(pady=10)
 
     tk.Button(root, text="Start", command=submit, width=15).pack(pady=10)
 
@@ -47,7 +54,28 @@ def get_user_inputs():
     return user_data
 
 
-# === GUI Prompt for Login and Options ===
+def set_opened_at_now(driver):
+    from datetime import datetime
+
+    now = datetime.now()
+    formatted_datetime = now.strftime("%Y-%m-%dT%H:%M")  # e.g., 2025-07-29T15:25
+
+    opened_at_input = driver.find_element(By.ID, "opened_at")
+
+    # Set value and dispatch input event
+    driver.execute_script("""
+        const input = arguments[0];
+        const value = arguments[1];
+        const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+        nativeInputValueSetter.call(input, value);
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+    """, opened_at_input, formatted_datetime)
+
+    print(f"🕒 Set 'Opened At' to current datetime: {formatted_datetime}")
+
+
+
+
 user_inputs = get_user_inputs()
 USERNAME = user_inputs["username"]
 PASSWORD = user_inputs["password"]
@@ -69,6 +97,14 @@ def get_csv_file():
     print(f"File selected: {file_path}")
     return file_path
 
+# === Utility Functions ===
+def element_exists(driver, xpath):
+    try:
+        driver.find_element(By.XPATH, xpath)
+        return True
+    except NoSuchElementException:
+        return False
+
 def wait_for_home_screen(driver, wait, timeout=120):
     print("⏮ Waiting for return to Home screen...")
     try:
@@ -80,9 +116,18 @@ def wait_for_home_screen(driver, wait, timeout=120):
     except Exception as e:
         print("❌ Timed out waiting for Home screen.")
         return False
-    
+
 # === Config ===
-DRIVER_PATH = r"C:\Users\ASin\Documents\edgedriver_win64\msedgedriver.exe"
+
+def get_driver_path(filename):
+    if getattr(sys, 'frozen', False):  # if running as compiled exe
+        base_path = sys._MEIPASS
+    else:
+        base_path = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(base_path, filename)
+
+DRIVER_PATH = get_driver_path("msedgedriver.exe")
+
 LOGIN_URL = "https://councilconnect.council.nyc.gov/login"
 FORM_URL = "https://councilconnect.council.nyc.gov/casework/create"
 
@@ -126,15 +171,17 @@ def main():
 
             click_next_step(driver, wait)
             select_intake_method(driver, wait, "Emailed")
+            set_opened_at_now(driver)
+            time.sleep(1)
+
             click_next_step(driver, wait)
             click_next_step(driver, wait)
 
             if auto_click_create:
                 click_create_casework(driver, wait)
-
                 if click_home_button(driver, wait):
                     if wait_for_home_screen(driver, wait):
-                        time.sleep(1)
+                        time.sleep(1) 
                         click_create_casework_from_home(driver, wait)
                     else:
                         print("❌ Home page not detected after clicking Home button.")
@@ -142,26 +189,31 @@ def main():
                     print("❌ Failed to click Home button after creating casework.")
             else:
                 print("🛑 Please click 'Create Casework' manually in the browser...")
-                try:
-                    WebDriverWait(driver, 60).until_not(
-                        EC.presence_of_element_located((By.XPATH, "//button[contains(text(), 'Create Casework')]"))
-                    )
-                    print("✅ Detected that 'Create Casework' was clicked.")
-                except:
-                    print("⚠️ Timeout waiting for manual click.")
 
-                # New: Click the Home button just like auto mode
-                if click_home_button(driver, wait):
-                    if wait_for_home_screen(driver, wait):
-                        time.sleep(0.5)
-                        print("🔁 Returning to Create Casework form for next entry...")
-                        click_create_casework_from_home(driver, wait)
-                    else:
-                        print("❌ Home page not detected after clicking Home button.")
-                else:
-                    print("❌ Failed to click Home button after manual create.")
+                # Wait until user submits or skips
+                home_screen_loaded = False
+                print("⌛ Waiting for user to either submit OR skip (manually return to Home)...")
 
-            print("✅ Entry processed\n")
+                while True:
+                    # Check if form was submitted (buttons gone)
+                    if not element_exists(driver, "//button[contains(text(), 'Create Casework')]") and \
+                       not element_exists(driver, "//button[contains(text(), 'Next Step')]"):
+                        print("✅ Form submitted — detected button disappearance.")
+                        break
+
+                    # Check if user went back to Home screen
+                    if element_exists(driver, "//h2[contains(text(),'Create Casework')]"):
+                        print("⏩ User skipped form — detected return to Home screen.")
+                        home_screen_loaded = True
+                        time.sleep(2)
+                        break
+
+                    time.sleep(4)
+
+                    
+
+                # Proceed to next entry
+                
 
         print("\n✅ All entries processed.")
     finally:
