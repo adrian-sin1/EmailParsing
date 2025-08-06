@@ -6,9 +6,9 @@ import io
 import xlsxwriter
 
 # Page setup
-st.set_page_config(page_title="📬 Email Parser Viewer", layout="wide")
-st.title("📬 Parsed Email Viewer")
-st.markdown("Upload and explore parsed emails, grouped by thread (subject). Select threads to export them as CSV, Excel, or Notepad.")
+st.set_page_config(page_title="📬 New Constituent Emails", layout="wide")
+st.title("📬 New Constituent Emails")
+st.markdown("Upload and explore , grouped by thread (subject). Select threads to export them as CSV, Excel, or Notepad.")
 
 # Load CSV
 uploaded_file = st.file_uploader("📥 Upload a parsed CSV file", type="csv")

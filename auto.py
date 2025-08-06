@@ -178,15 +178,18 @@ def main():
             click_next_step(driver, wait)
 
             if auto_click_create:
-                click_create_casework(driver, wait)
-                if click_home_button(driver, wait):
-                    if wait_for_home_screen(driver, wait):
-                        time.sleep(1) 
-                        click_create_casework_from_home(driver, wait)
-                    else:
-                        print("❌ Home page not detected after clicking Home button.")
-                else:
-                    print("❌ Failed to click Home button after creating casework.")
+                try:
+                    print("⏳ Waiting for 'Create Casework' button to appear...")
+                    wait.until(EC.presence_of_element_located((By.XPATH, "//button[contains(text(), 'Create Casework')]")))
+                    wait.until(EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'Create Casework')]")))
+                    click_create_casework(driver, wait)
+                    time.sleep(1)  # short delay to let form complete
+                    print("✅ Casework created. Moving to next person...\n")
+                except Exception as e:
+                    print(f"❌ Auto-click failed: {e}")
+                continue
+
+
             else:
                 print("🛑 Please click 'Create Casework' manually in the browser...")
 

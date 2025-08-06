@@ -1,5 +1,7 @@
 import csv
 import re
+import tkinter as tk
+from tkinter import filedialog
 
 def extract_replies_with_senders(body, csv_email):
     pattern = re.compile(
@@ -42,7 +44,18 @@ def extract_replies_with_senders(body, csv_email):
 
 
 def main():
-    input_file = "Export_for_Logs-New.csv"
+    # Open file picker
+    root = tk.Tk()
+    root.withdraw()  # Hide the main window
+    input_file = filedialog.askopenfilename(
+        title="Select CSV File",
+        filetypes=[("CSV files", "*.csv"), ("All files", "*.*")]
+    )
+
+    if not input_file:
+        print("❌ No file selected. Exiting.")
+        return
+
     output_file = "output.csv"
     rows = []
 
@@ -55,7 +68,6 @@ def main():
             subject = row.get("Subject", "").strip(" '\"")
             body = row.get("Body", "")
 
-            # Handle Exchange internal address — look for any external email in the body
             if email.lower().startswith("/o=nycc/ou=exchange"):
                 match_emails = re.findall(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b', body)
                 if match_emails:
